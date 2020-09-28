@@ -41,7 +41,7 @@ FLOAT_TYPES = {'float', 'double'}
 
 DATETIME_TYPES = {'datetime', 'timestamp', 'date'}
 
-BINARY_TYPES = {'binary', 'varbinary'}
+BINARY_TYPES = {'binary', 'varbinary', 'blob', 'longblob'}
 
 
 def discover_catalog(mysql_conn: Dict, dbs: str = None, tables: Optional[str] = None):
