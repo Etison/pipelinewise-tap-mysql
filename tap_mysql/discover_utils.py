@@ -201,7 +201,10 @@ def schema_for_column(column): # pylint: disable=too-many-branches
 
     elif data_type in STRING_TYPES:
         result.type = ['null', 'string']
-        result.maxLength = column.character_maximum_length
+        if data_type in ('longtext', 'mediumtext'):
+            result.maxLength = 65535
+        else:
+            result.maxLength = column.character_maximum_length
 
     elif data_type in DATETIME_TYPES:
         result.type = ['null', 'string']
@@ -214,6 +217,8 @@ def schema_for_column(column): # pylint: disable=too-many-branches
     elif data_type in BINARY_TYPES:
         result.type = ['null', 'string']
         result.format = 'binary'
+        if data_type in ('longblob', 'blob'):
+            result.maxLength = 65535
 
     else:
         result = Schema(None,

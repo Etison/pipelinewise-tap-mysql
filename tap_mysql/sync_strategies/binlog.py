@@ -150,7 +150,7 @@ def row_to_singer_record(catalog_entry, version, db_column_map, row, time_extrac
                 utc_datetime = local_datetime.astimezone(pytz.UTC)
                 row_to_persist[column_name] = utc_datetime.isoformat()
             else:
-                row_to_persist[column_name] = val.isoformat() + '+00:00'
+                row_to_persist[column_name] = val.isoformat()
 
         elif isinstance(val, datetime.date):
             row_to_persist[column_name] = val.isoformat() + 'T00:00:00+00:00'
@@ -167,8 +167,11 @@ def row_to_singer_record(catalog_entry, version, db_column_map, row, time_extrac
             row_to_persist[column_name] = json.dumps(json_bytes_to_string(val))
 
         elif isinstance(val, bytes):
-            # encode bytes as hex bytes then to utf8 string
-            row_to_persist[column_name] = codecs.encode(val, 'hex').decode('utf-8')
+            if column_name == 'additional_info':
+                # Additional_info has a bad header in it
+                row_to_persist[column_name] = codecs.encode(val, 'hex').decode('utf-8')[5:2**16-1]
+            else:
+                row_to_persist[column_name] = codecs.encode(val, 'hex').decode('utf-8')[:2**16-1]
 
         elif 'boolean' in property_type or property_type == 'boolean':
             if val is None:
@@ -180,7 +183,8 @@ def row_to_singer_record(catalog_entry, version, db_column_map, row, time_extrac
             else:
                 boolean_representation = True
             row_to_persist[column_name] = boolean_representation
-
+        elif val is not None and (column_name.startswith('html') or db_column_type == 'longtext'):
+            row_to_persist[column_name] = val[:2**16-1]
         else:
             row_to_persist[column_name] = val
 
