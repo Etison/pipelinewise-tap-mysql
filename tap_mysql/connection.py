@@ -8,22 +8,24 @@ import singer
 
 from pymysql.constants import CLIENT
 
-LOGGER = singer.get_logger('tap_mysql')
+LOGGER = singer.get_logger("tap_mysql")
 
 CONNECT_TIMEOUT_SECONDS = 30
 
 # We need to hold onto this for self-signed SSL
 MATCH_HOSTNAME = ssl.match_hostname
 
-DEFAULT_SESSION_SQLS = ['SET @@session.time_zone="+0:00"',
-                        'SET @@session.wait_timeout=28800',
-                        'SET @@session.net_read_timeout=3600',
-                        'SET @@session.innodb_lock_wait_timeout=3600']
+DEFAULT_SESSION_SQLS = [
+    'SET @@session.time_zone="+0:00"',
+    "SET @@session.wait_timeout=28800",
+    "SET @@session.net_read_timeout=3600",
+    "SET @@session.innodb_lock_wait_timeout=3600",
+]
 
-@backoff.on_exception(backoff.expo,
-                      (pymysql.err.OperationalError),
-                      max_tries=5,
-                      factor=2)
+
+@backoff.on_exception(
+    backoff.expo, (pymysql.err.OperationalError), max_tries=5, factor=2
+)
 def connect_with_backoff(connection):
     connection.connect()
     run_session_sqls(connection)
@@ -40,10 +42,12 @@ def run_session_sqls(connection):
             try:
                 run_sql(connection, sql)
             except pymysql.err.InternalError:
-                warnings.append(f'Could not set session variable: {sql}')
+                warnings.append(f"Could not set session variable: {sql}")
 
     if warnings:
-        LOGGER.warning('Encountered non-fatal errors when configuring session that could impact performance:')
+        LOGGER.warning(
+            "Encountered non-fatal errors when configuring session that could impact performance:"
+        )
     for warning in warnings:
         LOGGER.warning(warning)
 
@@ -96,7 +100,9 @@ class MySQLConnection(pymysql.connections.Connection):
             args["database"] = config["database"]
 
         # Attempt self-signed SSL if config vars are present
-        use_self_signed_ssl = config.get("ssl_ca") and config.get("ssl_cert") and config.get("ssl_key")
+        use_self_signed_ssl = (
+            config.get("ssl_ca") and config.get("ssl_cert") and config.get("ssl_key")
+        )
 
         if use_self_signed_ssl:
             LOGGER.info("Using custom certificate authority")
@@ -107,13 +113,13 @@ class MySQLConnection(pymysql.connections.Connection):
             # names were > 99 chars long in some cases. Since the box is ephemeral,
             # we don't need to worry about cleaning them up.
             with open("ca.pem", "wb") as ca_file:
-                ca_file.write(config["ssl_ca"].encode('utf-8'))
+                ca_file.write(config["ssl_ca"].encode("utf-8"))
 
             with open("cert.pem", "wb") as cert_file:
-                cert_file.write(config["ssl_cert"].encode('utf-8'))
+                cert_file.write(config["ssl_cert"].encode("utf-8"))
 
             with open("key.pem", "wb") as key_file:
-                key_file.write(config["ssl_key"].encode('utf-8'))
+                key_file.write(config["ssl_key"].encode("utf-8"))
 
             ssl_arg = {
                 "ca": "./ca.pem",
@@ -124,12 +130,14 @@ class MySQLConnection(pymysql.connections.Connection):
             # override match hostname for google cloud
             if config.get("internal_hostname"):
                 parsed_hostname = parse_internal_hostname(config["internal_hostname"])
-                ssl.match_hostname = lambda cert, hostname: MATCH_HOSTNAME(cert, parsed_hostname)
+                ssl.match_hostname = lambda cert, hostname: MATCH_HOSTNAME(
+                    cert, parsed_hostname
+                )
 
         super().__init__(defer_connect=True, ssl=ssl_arg, **args)
 
         # Attempt SSL
-        if config.get("ssl") == 'true' and not use_self_signed_ssl:
+        if config.get("ssl") == "true" and not use_self_signed_ssl:
             LOGGER.info("Attempting SSL connection")
             self.ssl = True
             self.ctx = ssl.create_default_context()
@@ -150,7 +158,7 @@ class MySQLConnection(pymysql.connections.Connection):
 def make_connection_wrapper(config):
     class ConnectionWrapper(MySQLConnection):
         def __init__(self, *args, **kwargs):  # pylint: disable=unused-argument
-            config["cursorclass"] = kwargs.get('cursorclass')
+            config["cursorclass"] = kwargs.get("cursorclass")
             super().__init__(config)
 
             connect_with_backoff(self)
