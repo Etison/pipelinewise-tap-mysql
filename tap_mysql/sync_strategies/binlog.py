@@ -34,7 +34,7 @@ SDC_DELETED_AT = "_sdc_deleted_at"
 
 UPDATE_BOOKMARK_PERIOD = 1000
 
-BOOKMARK_KEYS = {'log_file', 'log_pos', 'version'}
+BOOKMARK_KEYS = {'log_file', 'log_pos', 'version', 'timestamp'}
 
 MYSQL_TIMESTAMP_TYPES = {
     FIELD_TYPE.TIMESTAMP,
@@ -248,17 +248,12 @@ def calculate_bookmark(mysql_conn, binlog_streams_map, state):
             raise Exception("Unable to replicate binlog stream because no binary logs exist on the server.")
 
 
-def update_bookmarks(state, binlog_streams_map, log_file, log_pos):
+def update_bookmarks(state, binlog_streams_map, new_state):
     for tap_stream_id in binlog_streams_map.keys():
-        state = singer.write_bookmark(state,
+        for k,v in new_state.items():
+            state = singer.write_bookmark(state,
                                       tap_stream_id,
-                                      'log_file',
-                                      log_file)
-
-        state = singer.write_bookmark(state,
-                                      tap_stream_id,
-                                      'log_pos',
-                                      log_pos)
+                                      k, v)
 
     return state
 
@@ -356,15 +351,22 @@ def _run_binlog_sync(mysql_conn, reader, binlog_streams_map, state, config: Dict
     events_skipped = 0
 
     current_log_file, current_log_pos = fetch_current_log_file_and_pos(mysql_conn)
-    log_file = None
-    log_pos = None
+    current_state = {
+            'log_file': None,
+            'log_pos': None,
+            'timestamp': 0
+    }
 
     for binlog_event in reader:
         if isinstance(binlog_event, RotateEvent):
+            next_state = {
+                    'log_file': binlog_event.next_binlog,
+                    'log_pos': binlog_event.position,
+                    'timestamp': current_state['timestamp']
+            }
             state = update_bookmarks(state,
                                      binlog_streams_map,
-                                     binlog_event.next_binlog,
-                                     binlog_event.position)
+                                     next_state)
         else:
             tap_stream_id = common.generate_tap_stream_id(binlog_event.schema, binlog_event.table)
             streams_map_entry = binlog_streams_map.get(tap_stream_id, {})
@@ -457,13 +459,13 @@ def _run_binlog_sync(mysql_conn, reader, binlog_streams_map, state, config: Dict
                                  binlog_event.table)
 
         # Update log_file and log_pos after every processed binlog event
-        log_file = reader.log_file
-        log_pos = reader.log_pos
+        current_state['log_file'] = reader.log_file
+        current_state['log_pos'] = reader.log_pos
 
         # The iterator across python-mysql-replication's fetchone method should ultimately terminate
         # upon receiving an EOF packet. There seem to be some cases when a MySQL server will not send
         # one causing binlog replication to hang.
-        if current_log_file == log_file and log_pos >= current_log_pos:
+        if current_log_file == current_state['log_file'] and current_state['log_pos'] >= current_log_pos:
             break
 
         # Update singer bookmark and send STATE message periodically
@@ -471,16 +473,14 @@ def _run_binlog_sync(mysql_conn, reader, binlog_streams_map, state, config: Dict
                 (events_skipped and events_skipped % UPDATE_BOOKMARK_PERIOD == 0)):
             state = update_bookmarks(state,
                                      binlog_streams_map,
-                                     log_file,
-                                     log_pos)
+                                     current_state)
             singer.write_message(singer.StateMessage(value=copy.deepcopy(state)))
 
     # Update singer bookmark at the last time to point it the the last processed binlog event
-    if log_file and log_pos:
+    if current_state['log_pos'] and current_state['log_file']:
         state = update_bookmarks(state,
                                  binlog_streams_map,
-                                 log_file,
-                                 log_pos)
+                                 current_state)
 
 
 def sync_binlog_stream(mysql_conn, config, binlog_streams, state):
