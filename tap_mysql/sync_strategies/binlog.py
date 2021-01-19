@@ -358,11 +358,13 @@ def _run_binlog_sync(mysql_conn, reader, binlog_streams_map, state, config: Dict
     }
 
     for binlog_event in reader:
+        current_state['timestamp'] = max(current_state['timestamp'], binlog_event.timestamp)
+
         if isinstance(binlog_event, RotateEvent):
             next_state = {
                     'log_file': binlog_event.next_binlog,
                     'log_pos': binlog_event.position,
-                    'timestamp': current_state['timestamp']
+                    'timestamp': max(current_state['timestamp'], 0)
             }
             state = update_bookmarks(state,
                                      binlog_streams_map,
