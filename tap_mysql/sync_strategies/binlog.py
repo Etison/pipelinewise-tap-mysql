@@ -31,6 +31,7 @@ from tap_mysql.connection import connect_with_backoff, make_connection_wrapper
 LOGGER = singer.get_logger('tap_mysql')
 
 SDC_DELETED_AT = "_sdc_deleted_at"
+SYS_UPDATED_AT = "_sys_updated_at"
 
 UPDATE_BOOKMARK_PERIOD = 1000
 
@@ -48,7 +49,13 @@ def add_automatic_properties(catalog_entry, columns):
         format="date-time"
     )
 
+    catalog_entry.schema.properties[SYS_UPDATED_AT] = Schema(
+        type=["null", "string"],
+        format="date-time"
+    )
+
     columns.append(SDC_DELETED_AT)
+    columns.append(SYS_UPDATED_AT)
 
     return columns
 
@@ -267,7 +274,11 @@ def handle_write_rows_event(event, catalog_entry, state, columns, rows_saved, ti
     db_column_types = get_db_column_types(event)
 
     for row in event.rows:
-        filtered_vals = {k: v for k, v in row['values'].items()
+        event_ts = datetime.datetime.utcfromtimestamp(event.timestamp).replace(tzinfo=pytz.UTC)
+        vals = row['values']
+        vals[SYS_UPDATED_AT] = event_ts
+
+        filtered_vals = {k: v for k, v in vals.items()
                          if k in columns}
 
         record_message = row_to_singer_record(catalog_entry,
@@ -287,7 +298,11 @@ def handle_update_rows_event(event, catalog_entry, state, columns, rows_saved, t
     db_column_types = get_db_column_types(event)
 
     for row in event.rows:
-        filtered_vals = {k: v for k, v in row['after_values'].items()
+        event_ts = datetime.datetime.utcfromtimestamp(event.timestamp).replace(tzinfo=pytz.UTC)
+        vals = row['after_values']
+        vals[SYS_UPDATED_AT] = event_ts
+
+        filtered_vals = {k: v for k, v in vals.items()
                          if k in columns}
 
         record_message = row_to_singer_record(catalog_entry,
@@ -311,7 +326,9 @@ def handle_delete_rows_event(event, catalog_entry, state, columns, rows_saved, t
         event_ts = datetime.datetime.utcfromtimestamp(event.timestamp).replace(tzinfo=pytz.UTC)
 
         vals = row['values']
+
         vals[SDC_DELETED_AT] = event_ts
+        vals[SYS_UPDATED_AT] = event_ts
 
         filtered_vals = {k: v for k, v in vals.items()
                          if k in columns}
