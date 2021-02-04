@@ -32,6 +32,11 @@ LOGGER = singer.get_logger('tap_mysql')
 
 SDC_DELETED_AT = "_sdc_deleted_at"
 SYS_UPDATED_AT = "_sys_updated_at"
+SYS_EVENT_TYPE = "_sys_event_type"
+
+INSERT_EVENT = 1
+UPDATE_EVENT = 2
+DELETE_EVENT = 3
 
 UPDATE_BOOKMARK_PERIOD = 1000
 
@@ -54,8 +59,14 @@ def add_automatic_properties(catalog_entry, columns):
         format="date-time"
     )
 
+    catalog_entry.schema.properties[SYS_EVENT_TYPE] = Schema(
+        type="integer"
+    )
+
+
     columns.append(SDC_DELETED_AT)
     columns.append(SYS_UPDATED_AT)
+    columns.append(SYS_EVENT_TYPE)
 
     return columns
 
@@ -277,6 +288,7 @@ def handle_write_rows_event(event, catalog_entry, state, columns, rows_saved, ti
         event_ts = datetime.datetime.utcfromtimestamp(event.timestamp).replace(tzinfo=pytz.UTC)
         vals = row['values']
         vals[SYS_UPDATED_AT] = event_ts
+        vals[SYS_EVENT_TYPE] = INSERT_EVENT
 
         filtered_vals = {k: v for k, v in vals.items()
                          if k in columns}
@@ -301,6 +313,7 @@ def handle_update_rows_event(event, catalog_entry, state, columns, rows_saved, t
         event_ts = datetime.datetime.utcfromtimestamp(event.timestamp).replace(tzinfo=pytz.UTC)
         vals = row['after_values']
         vals[SYS_UPDATED_AT] = event_ts
+        vals[SYS_EVENT_TYPE] = UPDATE_EVENT
 
         filtered_vals = {k: v for k, v in vals.items()
                          if k in columns}
@@ -329,6 +342,7 @@ def handle_delete_rows_event(event, catalog_entry, state, columns, rows_saved, t
 
         vals[SDC_DELETED_AT] = event_ts
         vals[SYS_UPDATED_AT] = event_ts
+        vals[SYS_EVENT_TYPE] = DELETE_EVENT
 
         filtered_vals = {k: v for k, v in vals.items()
                          if k in columns}
