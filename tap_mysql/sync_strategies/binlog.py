@@ -23,8 +23,10 @@ from pymysqlreplication.row_event import (
 )
 from singer import utils, Schema
 
+from hashlib import sha1
+
 import tap_mysql.sync_strategies.common as common
-from tap_mysql.stream_utils import write_schema_message
+from tap_mysql.stream_utils import write_schema_message, get_key_properties
 from tap_mysql.discover_utils import discover_catalog, desired_columns
 from tap_mysql.connection import connect_with_backoff, make_connection_wrapper
 
@@ -33,6 +35,8 @@ LOGGER = singer.get_logger('tap_mysql')
 SDC_DELETED_AT = "_sdc_deleted_at"
 SYS_UPDATED_AT = "_sys_updated_at"
 SYS_EVENT_TYPE = "_sys_event_type"
+SYS_HASHDIFF   = "_sys_hashdiff"
+SYS_HASHKEY    = "_sys_hashkey"
 
 INSERT_EVENT = 1
 UPDATE_EVENT = 2
@@ -63,10 +67,22 @@ def add_automatic_properties(catalog_entry, columns):
         type="integer"
     )
 
+    catalog_entry.schema.properties[SYS_HASHDIFF] = Schema(
+            type=["null", "string"],
+            format="date-time"
+    )
+
+    catalog_entry.schema.properties[SYS_HASHKEY] = Schema(
+            type=["null", "string"],
+            format="date-time"
+    )
+
 
     columns.append(SDC_DELETED_AT)
     columns.append(SYS_UPDATED_AT)
     columns.append(SYS_EVENT_TYPE)
+    columns.append(SYS_HASHKEY)
+    columns.append(SYS_HASHDIFF)
 
     return columns
 
@@ -152,6 +168,8 @@ def row_to_singer_record(catalog_entry, version, db_column_map, row, time_extrac
     LOGGER.debug('Schema properties: %s',catalog_entry.schema.properties)
     LOGGER.debug('Event columns: %s', db_column_map)
 
+    key_properties = get_key_properties(catalog_entry)
+
     for column_name, val in row.items():
         property_type = catalog_entry.schema.properties[column_name].type
         property_format = catalog_entry.schema.properties[column_name].format
@@ -205,6 +223,9 @@ def row_to_singer_record(catalog_entry, version, db_column_map, row, time_extrac
             row_to_persist[column_name] = val[:2**16-1]
         else:
             row_to_persist[column_name] = val
+
+    record[SYS_HASHKEY] = calculate_hashkey(record, key_properties, catalog_entry.metadata)
+    record[SYS_HASHDIFF] = calculate_hashdiff(record, key_properties, catalog_entry.metadata)
 
     return singer.RecordMessage(
         stream=catalog_entry.stream,
@@ -278,6 +299,41 @@ def update_bookmarks(state, binlog_streams_map, new_state):
 
 def get_db_column_types(event):
     return {c.name: c.type for c in event.columns}
+
+
+def _join_hashes(values):
+    '''
+    This will iterate through the values inputted sha each one up individually but then
+    Sha up the remaining
+
+    Do we want to change None for something else? Like NULL?
+    '''
+
+    output = map(lambda x: sha1(str(x).encode('utf-8')), values)
+
+    return sha1(''.join(output).encode('utf-8')).hexdigest()
+
+def calculate_hashdiff(record, key_properties, metadata):
+    '''
+    Hash diff:
+        Every column minus the id column and metadata columns (everything with an underscore) + _sys_deleted_at
+    '''
+
+    keys = set(record.keys()) - set(key_properties) - set(metadata_cols)
+
+    return _join_hashes(map(lambda k: record[k], keys))
+
+def calculate_hashkey(record, key_properties, metadata):
+    '''
+    Hash Key
+    Hash key = id
+        Unique constraint: id + _sys_updated_at
+    '''
+
+    keys = set(key_properties) + set([SYS_UPDATED_AT])
+
+    return _join_hashes(map(lambda k: record[k], keys))
+
 
 
 def handle_write_rows_event(event, catalog_entry, state, columns, rows_saved, time_extracted):

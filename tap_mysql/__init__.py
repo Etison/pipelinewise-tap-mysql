@@ -413,6 +413,7 @@ def log_server_params(mysql_conn):
 
 
 def main_impl():
+    import ipdb; ipdb.set_trace()
     args = singer.utils.parse_args(REQUIRED_CONFIG_KEYS)
 
     mysql_conn = MySQLConnection(args.config)
@@ -437,3 +438,6 @@ def main():
     except Exception as exc:
         LOGGER.critical(exc)
         raise exc
+
+if __name__ == '__main__':
+    main()

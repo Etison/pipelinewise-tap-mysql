@@ -173,6 +173,7 @@ def discover_catalog(mysql_conn: Dict, dbs: str = None, tables: Optional[str] = 
 
                 entries.append(entry)
 
+
     return Catalog(entries)
 
 
