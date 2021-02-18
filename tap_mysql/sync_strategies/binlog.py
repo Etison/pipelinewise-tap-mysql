@@ -32,11 +32,15 @@ from tap_mysql.connection import connect_with_backoff, make_connection_wrapper
 
 LOGGER = singer.get_logger('tap_mysql')
 
+
 SDC_DELETED_AT = "_sdc_deleted_at"
 SYS_UPDATED_AT = "_sys_updated_at"
 SYS_EVENT_TYPE = "_sys_event_type"
-SYS_HASHDIFF   = "_sys_hashdiff"
+SYS_HASHDIFF   = "_sys_diffkey"
 SYS_HASHKEY    = "_sys_hashkey"
+
+METADATA_COLS  = set([SDC_DELETED_AT, SYS_UPDATED_AT, SYS_EVENT_TYPE, SYS_HASHDIFF, SYS_HASHKEY, '_sdc_extracted_at',
+    '_sdc_batched_at'])
 
 INSERT_EVENT = 1
 UPDATE_EVENT = 2
@@ -224,8 +228,8 @@ def row_to_singer_record(catalog_entry, version, db_column_map, row, time_extrac
         else:
             row_to_persist[column_name] = val
 
-    record[SYS_HASHKEY] = calculate_hashkey(record, key_properties, catalog_entry.metadata)
-    record[SYS_HASHDIFF] = calculate_hashdiff(record, key_properties, catalog_entry.metadata)
+    row_to_persist[SYS_HASHKEY] = calculate_hashkey(row_to_persist, key_properties)
+    row_to_persist[SYS_HASHDIFF] = calculate_hashdiff(row_to_persist, key_properties)
 
     return singer.RecordMessage(
         stream=catalog_entry.stream,
@@ -309,28 +313,28 @@ def _join_hashes(values):
     Do we want to change None for something else? Like NULL?
     '''
 
-    output = map(lambda x: sha1(str(x).encode('utf-8')), values)
+    output = map(lambda x: sha1(str(x).encode('utf-8')).hexdigest(), values)
 
     return sha1(''.join(output).encode('utf-8')).hexdigest()
 
-def calculate_hashdiff(record, key_properties, metadata):
+def calculate_hashdiff(record, key_properties):
     '''
     Hash diff:
         Every column minus the id column and metadata columns (everything with an underscore) + _sys_deleted_at
     '''
 
-    keys = set(record.keys()) - set(key_properties) - set(metadata_cols)
+    keys = set(sorted(record.keys())) - set(key_properties) - METADATA_COLS
 
     return _join_hashes(map(lambda k: record[k], keys))
 
-def calculate_hashkey(record, key_properties, metadata):
+def calculate_hashkey(record, key_properties):
     '''
     Hash Key
     Hash key = id
         Unique constraint: id + _sys_updated_at
     '''
 
-    keys = set(key_properties) + set([SYS_UPDATED_AT])
+    keys = set(key_properties) | set([SYS_UPDATED_AT])
 
     return _join_hashes(map(lambda k: record[k], keys))
 
