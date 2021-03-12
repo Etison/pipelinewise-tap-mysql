@@ -228,8 +228,8 @@ def row_to_singer_record(catalog_entry, version, db_column_map, row, time_extrac
         else:
             row_to_persist[column_name] = val
 
-    row_to_persist[SYS_HASHKEY] = calculate_hashkey(row_to_persist, key_properties)
-    row_to_persist[SYS_HASHDIFF] = calculate_hashdiff(row_to_persist, key_properties)
+    row_to_persist[SYS_HASHKEY] = '' # calculate_hashkey(row_to_persist, key_properties)
+    row_to_persist[SYS_HASHDIFF] = '' # calculate_hashdiff(row_to_persist, key_properties)
 
     return singer.RecordMessage(
         stream=catalog_entry.stream,
