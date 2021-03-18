@@ -18,8 +18,8 @@ MATCH_HOSTNAME = ssl.match_hostname
 DEFAULT_SESSION_SQLS = [
     'SET @@session.time_zone="+0:00"',
     "SET @@session.wait_timeout=28800",
-    "SET @@session.net_read_timeout=3600",
-    "SET @@session.innodb_lock_wait_timeout=3600",
+    "SET @@session.net_read_timeout=36000",
+    "SET @@session.innodb_lock_wait_timeout=36000",
 ]
 
 
