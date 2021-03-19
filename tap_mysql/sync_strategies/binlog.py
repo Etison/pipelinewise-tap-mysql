@@ -448,7 +448,9 @@ def _run_binlog_sync(mysql_conn, reader, binlog_streams_map, state, config: Dict
             'timestamp': 0
     }
 
+    last_binlog_event = None
     for binlog_event in reader:
+        last_binlog_event = binlog_event
         current_state['timestamp'] = max(current_state['timestamp'], binlog_event.timestamp)
 
         if isinstance(binlog_event, RotateEvent):
@@ -559,6 +561,7 @@ def _run_binlog_sync(mysql_conn, reader, binlog_streams_map, state, config: Dict
         # upon receiving an EOF packet. There seem to be some cases when a MySQL server will not send
         # one causing binlog replication to hang.
         if current_log_file == current_state['log_file'] and current_state['log_pos'] >= current_log_pos:
+            LOGGER.info("BREAKING {} : {}".format(current_log_file, current_log_pos))
             break
 
         # Update singer bookmark and send STATE message periodically
@@ -569,11 +572,14 @@ def _run_binlog_sync(mysql_conn, reader, binlog_streams_map, state, config: Dict
                                      current_state)
             singer.write_message(singer.StateMessage(value=copy.deepcopy(state)))
 
+    LOGGER.info("ALL DONE SOMEHOW")
+
     # Update singer bookmark at the last time to point it the the last processed binlog event
     if current_state['log_pos'] and current_state['log_file']:
         state = update_bookmarks(state,
                                  binlog_streams_map,
                                  current_state)
+    return last_binlog_event
 
 
 def sync_binlog_stream(mysql_conn, config, binlog_streams, state):
@@ -596,18 +602,25 @@ def sync_binlog_stream(mysql_conn, config, binlog_streams, state):
     connection_wrapper = make_connection_wrapper(config)
     reader = None
     try:
-        reader = BinLogStreamReader(
-            connection_settings={},
-            server_id=server_id,
-            slave_uuid=f'stitch-slave-{server_id}',
-            log_file=log_file,
-            log_pos=log_pos,
-            resume_stream=True,
-            only_events=[RotateEvent, WriteRowsEvent, UpdateRowsEvent, DeleteRowsEvent],
-            pymysql_wrapper=connection_wrapper
-        )
-        LOGGER.info("Starting binlog replication with log_file=%s, log_pos=%s", log_file, log_pos)
-        _run_binlog_sync(mysql_conn, reader, binlog_streams_map, state, config)
+        last_event = None
+
+        while last_event is None or isinstance(last_event, RotateEvent):
+            reader = BinLogStreamReader(
+                connection_settings={'read_timeout': 4294967},
+                server_id=server_id,
+                slave_uuid=f'stitch-slave-{server_id}',
+                log_file=log_file,
+                log_pos=log_pos,
+                resume_stream=True,
+                only_events=[RotateEvent, WriteRowsEvent, UpdateRowsEvent, DeleteRowsEvent],
+                pymysql_wrapper=connection_wrapper,
+                slave_heartbeat=4294967
+            )
+            LOGGER.info("Starting binlog replication with log_file=%s, log_pos=%s", log_file, log_pos)
+            last_event = _run_binlog_sync(mysql_conn, reader, binlog_streams_map, state, config)
+
+            log_file = reader.log_file
+            log_pos  = reader.log_pos
     finally:
         # BinLogStreamReader doesn't implement the `with` methods
         # So, try/finally will close the chain from the top
