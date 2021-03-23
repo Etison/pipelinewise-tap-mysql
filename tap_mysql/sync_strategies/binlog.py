@@ -460,6 +460,8 @@ def _run_binlog_sync(mysql_conn, reader, binlog_streams_map, state, config: Dict
                     'log_pos': binlog_event.position,
                     'timestamp': max(current_state['timestamp'], 0)
             }
+
+            LOGGER.info("LOG Rotated: {}".format(next_state['log_file']))
             state = update_bookmarks(state,
                                      binlog_streams_map,
                                      next_state)
