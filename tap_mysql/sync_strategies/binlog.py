@@ -579,7 +579,6 @@ def _run_binlog_sync(mysql_conn, reader, binlog_streams_map, state, config: Dict
         state = update_bookmarks(state,
                                  binlog_streams_map,
                                  current_state)
-    return last_binlog_event
 
 
 def sync_binlog_stream(mysql_conn, config, binlog_streams, state):
@@ -602,25 +601,19 @@ def sync_binlog_stream(mysql_conn, config, binlog_streams, state):
     connection_wrapper = make_connection_wrapper(config)
     reader = None
     try:
-        last_event = None
-
-        while last_event is None or isinstance(last_event, RotateEvent):
-            reader = BinLogStreamReader(
-                connection_settings={'read_timeout': 4294967},
-                server_id=server_id,
-                slave_uuid=f'stitch-slave-{server_id}',
-                log_file=log_file,
-                log_pos=log_pos,
-                resume_stream=True,
-                only_events=[RotateEvent, WriteRowsEvent, UpdateRowsEvent, DeleteRowsEvent],
-                pymysql_wrapper=connection_wrapper,
-                slave_heartbeat=4294967
-            )
-            LOGGER.info("Starting binlog replication with log_file=%s, log_pos=%s", log_file, log_pos)
-            last_event = _run_binlog_sync(mysql_conn, reader, binlog_streams_map, state, config)
-
-            log_file = reader.log_file
-            log_pos  = reader.log_pos
+        reader = BinLogStreamReader(
+            connection_settings={},
+            server_id=server_id,
+            slave_uuid=f'stitch-slave-{server_id}',
+            log_file=log_file,
+            log_pos=log_pos,
+            resume_stream=True,
+            only_events=[RotateEvent, WriteRowsEvent, UpdateRowsEvent, DeleteRowsEvent],
+            pymysql_wrapper=connection_wrapper,
+            blocking=True
+        )
+        LOGGER.info("Starting binlog replication with log_file=%s, log_pos=%s", log_file, log_pos)
+        _run_binlog_sync(mysql_conn, reader, binlog_streams_map, state, config)
     finally:
         # BinLogStreamReader doesn't implement the `with` methods
         # So, try/finally will close the chain from the top
