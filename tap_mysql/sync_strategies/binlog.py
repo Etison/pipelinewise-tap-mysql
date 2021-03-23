@@ -5,6 +5,7 @@ import copy
 import datetime
 import json
 import re
+import random
 
 import pymysql.connections
 import pymysql.err
@@ -600,17 +601,19 @@ def sync_binlog_stream(mysql_conn, config, binlog_streams, state):
 
     connection_wrapper = make_connection_wrapper(config)
     reader = None
+
     try:
+        slave_uuid = f"bi-reader-%04x" % random.getrandbits(64)
+
         reader = BinLogStreamReader(
             connection_settings={},
             server_id=server_id,
-            slave_uuid=f'stitch-slave-{server_id}',
+            slave_uuid=slave_uuid,
             log_file=log_file,
             log_pos=log_pos,
             resume_stream=True,
             only_events=[RotateEvent, WriteRowsEvent, UpdateRowsEvent, DeleteRowsEvent],
             pymysql_wrapper=connection_wrapper,
-            blocking=True
         )
         LOGGER.info("Starting binlog replication with log_file=%s, log_pos=%s", log_file, log_pos)
         _run_binlog_sync(mysql_conn, reader, binlog_streams_map, state, config)
