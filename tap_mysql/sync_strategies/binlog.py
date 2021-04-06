@@ -229,8 +229,8 @@ def row_to_singer_record(catalog_entry, version, db_column_map, row, time_extrac
         else:
             row_to_persist[column_name] = val
 
-    row_to_persist[SYS_HASHKEY] = '' # calculate_hashkey(row_to_persist, key_properties)
-    row_to_persist[SYS_HASHDIFF] = '' # calculate_hashdiff(row_to_persist, key_properties)
+    row_to_persist[SYS_HASHKEY] = calculate_hashkey(row_to_persist, key_properties)
+    row_to_persist[SYS_HASHDIFF] = calculate_hashdiff(row_to_persist, key_properties)
 
     return singer.RecordMessage(
         stream=catalog_entry.stream,
@@ -308,13 +308,19 @@ def get_db_column_types(event):
 
 def _join_hashes(values):
     '''
-    This will iterate through the values inputted sha each one up individually but then
-    Sha up the remaining
+    _join_hashes will take an input value stream and sha1 them together
 
-    Do we want to change None for something else? Like NULL?
+    We will ignore blank strings and None mainly because if there's an added column in the future this will change
+
     '''
 
-    output = map(lambda x: sha1(str(x).encode('utf-8')).hexdigest(), values)
+    def encode(x):
+        if x == '' or x is None:
+            return ''
+        else:
+            return sha1(str(x).encode('utf-8')).hexdigest()
+
+    output = map(lambda x: encode(x), values)
 
     return sha1(''.join(output).encode('utf-8')).hexdigest()
 
