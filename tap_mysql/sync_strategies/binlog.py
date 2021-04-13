@@ -315,10 +315,12 @@ def _join_hashes(values):
     '''
 
     def encode(x):
-        if x == '' or x is None:
+        s = str(x).encode('utf-8').strip()
+
+        if x is None or s == '':
             return ''
         else:
-            return sha1(str(x).encode('utf-8')).hexdigest()
+            return sha1(s).hexdigest()
 
     output = map(lambda x: encode(x), values)
 
