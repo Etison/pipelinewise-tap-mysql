@@ -330,7 +330,12 @@ def calculate_hashdiff(record, key_properties):
         Every column minus the id column and metadata columns (everything with an underscore) + _sys_deleted_at
     '''
 
-    keys = set(sorted(record.keys())) - set(key_properties) - METADATA_COLS
+    keys = list(
+        filter(
+            lambda x: x[0:4] not in ('_sys', '_sdc') and x[0:3] != ('_is'),
+            set(sorted(record.keys())) - set(key_properties)
+        )
+    )
 
     return _join_hashes(map(lambda k: record[k], keys))
 
@@ -344,6 +349,79 @@ def calculate_hashkey(record, key_properties):
     keys = set(key_properties) | set([SYS_UPDATED_AT])
 
     return _join_hashes(map(lambda k: record[k], keys))
+
+def _join_hashes_sql(properties):
+    '''
+    Datetimes
+    Ints
+    ??
+    '''
+    
+    def encode(column, _type):
+        _format = _type.get('format', False)
+        _type = set(_type['type']) - set(['null'])
+        
+        assert len(_type) == 1
+        
+        _type = list(_type)[0]
+        
+        encode_stmt = ''
+        if _type == 'boolean':
+            true = sha1('True'.encode('utf-8')).hexdigest()
+            false = sha1('False'.encode('utf-8')).hexdigest()
+            encode_stmt = f"(CASE WHEN {column} AND {column} IS NOT NULL THEN '{true}' ELSE '{false}' END)"
+        elif _format == 'date-time' and _type == 'string':
+            encode_stmt = f"(CASE WHEN {column} IS NOT NULL THEN SHA1(to_char({column}, 'YYYY-MM-DD\"T\"HH24:MI:SS+00:00')) ELSE '' END)"
+        elif _type == 'string':
+            encode_stmt = f"(CASE WHEN TRIM(COALESCE({column}, '')) <> '' THEN SHA1({column}) ELSE '' END)"
+        elif _type == 'integer':
+            encode_stmt = f"(CASE WHEN {column} IS NOT NULL THEN SHA1({column}::text) ELSE '' END)"
+        else:
+            raise Exception("Unknown Type {}".format(_type))
+        return encode_stmt
+    
+    sql = " || ".join([
+        encode(k, properties[k])#f"(CASE WHEN {v} IS NULL or {v} = '' THEN '' ELSE SHA1({v}) END)"
+        for k in sorted(properties.keys())
+    ])
+    
+    return "SHA1({})".format(sql)
+
+def calculate_hashkey_sql(catalog_entry):
+    key_properties = get_key_properties(catalog_entry)
+    
+    keys = set(key_properties) | set([SYS_UPDATED_AT])
+    
+    schema = catalog_entry.schema.to_dict()['properties']
+    
+    properties = {
+        k: schema[k]
+        for k in key_properties
+    }
+    
+    properties['_sys_updated_at'] = {'type': ['string'], 'format': 'date-time'}
+    
+    return _join_hashes_sql(properties)
+
+def calculate_hashdiff_sql(catalog_entry):
+    key_properties = get_key_properties(catalog_entry)
+    schema = catalog_entry.schema.to_dict()['properties']
+    
+    properties = catalog_entry.schema.to_dict()['properties'].keys()
+    
+    keys = list(
+        filter(
+            lambda x: x[0:4] not in ('_sys', '_sdc') and x[0:3] != ('_is'),
+            set(sorted(properties)) - set(key_properties)
+        )
+    )
+    
+    properties = {
+        k: schema[k]
+        for k in keys
+    }
+    
+    return _join_hashes_sql(properties)
 
 
 
