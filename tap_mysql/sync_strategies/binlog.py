@@ -339,6 +339,8 @@ def calculate_hashdiff(record, key_properties):
         )
     )
 
+    keys = sorted(keys)
+
     return _join_hashes(map(lambda k: record[k], keys))
 
 def calculate_hashkey(record, key_properties):
@@ -383,7 +385,7 @@ def _join_hashes_sql(properties):
         return encode_stmt
     
     sql = " || ".join([
-        encode(k, properties[k])#f"(CASE WHEN {v} IS NULL or {v} = '' THEN '' ELSE SHA1({v}) END)"
+        encode(k, properties[k])
         for k in sorted(properties.keys())
     ])
     
