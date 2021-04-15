@@ -39,9 +39,10 @@ SYS_UPDATED_AT = "_sys_updated_at"
 SYS_EVENT_TYPE = "_sys_event_type"
 SYS_HASHDIFF   = "_sys_diffkey"
 SYS_HASHKEY    = "_sys_hashkey"
+SDC_SEQUENCE   = "_sdc_sequence"
 
 METADATA_COLS  = set([SDC_DELETED_AT, SYS_UPDATED_AT, SYS_EVENT_TYPE, SYS_HASHDIFF, SYS_HASHKEY, '_sdc_extracted_at',
-    '_sdc_batched_at'])
+    '_sdc_batched_at', SDC_SEQUENCE])
 
 INSERT_EVENT = 1
 UPDATE_EVENT = 2
@@ -82,12 +83,17 @@ def add_automatic_properties(catalog_entry, columns):
             format="date-time"
     )
 
+    catalog_entry.schema.properties[SDC_SEQUENCE] = Schema(
+        type='integer'
+    )
+
 
     columns.append(SDC_DELETED_AT)
     columns.append(SYS_UPDATED_AT)
     columns.append(SYS_EVENT_TYPE)
     columns.append(SYS_HASHKEY)
     columns.append(SYS_HASHDIFF)
+    columns.append(SDC_SEQUENCE)
 
     return columns
 
@@ -374,8 +380,10 @@ def _join_hashes_sql(properties):
             true = sha1('True'.encode('utf-8')).hexdigest()
             false = sha1('False'.encode('utf-8')).hexdigest()
             encode_stmt = f"(CASE WHEN {column} AND {column} IS NOT NULL THEN '{true}' ELSE '{false}' END)"
-        elif _format == 'date-time' and _type == 'string':
+        elif _format == 'date-time' and _type == 'string' and column == '_sys_updated_at':
             encode_stmt = f"(CASE WHEN {column} IS NOT NULL THEN SHA1(to_char({column}, 'YYYY-MM-DD\"T\"HH24:MI:SS+00:00')) ELSE '' END)"
+        elif _format == 'date-time' and _type == 'string' and column != '_sys_updated_at':
+            encode_stmt = f"(CASE WHEN {column} IS NOT NULL THEN SHA1(to_char({column}, 'YYYY-MM-DD\"T\"HH24:MI:SS')) ELSE '' END)"
         elif _type == 'string':
             encode_stmt = f"(CASE WHEN TRIM(COALESCE({column}, '')) <> '' THEN SHA1({column}) ELSE '' END)"
         elif _type == 'integer':
@@ -433,11 +441,14 @@ def handle_write_rows_event(event, catalog_entry, state, columns, rows_saved, ti
     stream_version = common.get_stream_version(catalog_entry.tap_stream_id, state)
     db_column_types = get_db_column_types(event)
 
+    sdc_sequence = 0
     for row in event.rows:
+        sdc_sequence += 1
         event_ts = datetime.datetime.utcfromtimestamp(event.timestamp).replace(tzinfo=pytz.UTC)
         vals = row['values']
         vals[SYS_UPDATED_AT] = event_ts
         vals[SYS_EVENT_TYPE] = INSERT_EVENT
+        vals[SDC_SEQUENCE]   = sdc_sequence
 
         filtered_vals = {k: v for k, v in vals.items()
                          if k in columns}
@@ -458,11 +469,14 @@ def handle_update_rows_event(event, catalog_entry, state, columns, rows_saved, t
     stream_version = common.get_stream_version(catalog_entry.tap_stream_id, state)
     db_column_types = get_db_column_types(event)
 
+    sdc_sequence = 0
     for row in event.rows:
+        sdc_sequence += 1
         event_ts = datetime.datetime.utcfromtimestamp(event.timestamp).replace(tzinfo=pytz.UTC)
         vals = row['after_values']
         vals[SYS_UPDATED_AT] = event_ts
         vals[SYS_EVENT_TYPE] = UPDATE_EVENT
+        vals[SDC_SEQUENCE]   = sdc_sequence
 
         filtered_vals = {k: v for k, v in vals.items()
                          if k in columns}
@@ -484,7 +498,9 @@ def handle_delete_rows_event(event, catalog_entry, state, columns, rows_saved, t
     stream_version = common.get_stream_version(catalog_entry.tap_stream_id, state)
     db_column_types = get_db_column_types(event)
 
+    sdc_sequence = 0
     for row in event.rows:
+        sdc_sequence += 1
         event_ts = datetime.datetime.utcfromtimestamp(event.timestamp).replace(tzinfo=pytz.UTC)
 
         vals = row['values']
@@ -492,6 +508,7 @@ def handle_delete_rows_event(event, catalog_entry, state, columns, rows_saved, t
         vals[SDC_DELETED_AT] = event_ts
         vals[SYS_UPDATED_AT] = event_ts
         vals[SYS_EVENT_TYPE] = DELETE_EVENT
+        vals[SDC_SEQUENCE]   = sdc_sequence
 
         filtered_vals = {k: v for k, v in vals.items()
                          if k in columns}
@@ -539,6 +556,7 @@ def _run_binlog_sync(mysql_conn, reader, binlog_streams_map, state, config: Dict
 
     last_binlog_event = None
     for binlog_event in reader:
+
         last_binlog_event = binlog_event
         current_state['timestamp'] = max(current_state['timestamp'], binlog_event.timestamp)
 
