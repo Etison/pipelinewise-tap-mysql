@@ -39,8 +39,8 @@ SYS_UPDATED_AT = "_sys_updated_at"
 SYS_EVENT_TYPE = "_sys_event_type"
 SYS_HASHDIFF   = "_sys_diffkey"
 SYS_HASHKEY    = "_sys_hashkey"
-SYS_LOG_POS    = "_sys_log_pos"
-SYS_LINENO     = "_sys_lineno"
+SYS_LOG_POS    = "_sys_log_position"
+SYS_LINENO     = "_sys_transaction_lineno"
 
 METADATA_COLS  = set([SDC_DELETED_AT, SYS_UPDATED_AT, SYS_EVENT_TYPE, SYS_HASHDIFF, SYS_HASHKEY, '_sdc_extracted_at',
     '_sdc_batched_at', SYS_LINENO, SYS_LOG_POS])
