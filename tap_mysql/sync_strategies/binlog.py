@@ -335,9 +335,7 @@ def _join_hashes(values):
         else:
             return sha1(s).hexdigest()
 
-    output = map(lambda x: encode(x), values)
-
-    return sha1(''.join(output).encode('utf-8')).hexdigest()
+    return sha1(''.join([encode(v) for v in values]).encode('utf-8')).hexdigest()
 
 def calculate_hashdiff(record, key_properties):
     '''
@@ -354,7 +352,7 @@ def calculate_hashdiff(record, key_properties):
 
     keys = sorted(keys)
 
-    return _join_hashes(map(lambda k: record[k], keys))
+    return _join_hashes([record[k] for k in keys])
 
 def calculate_hashkey(record, key_properties):
     '''
@@ -365,7 +363,7 @@ def calculate_hashkey(record, key_properties):
 
     keys = set(key_properties) | set([SYS_UPDATED_AT])
 
-    return _join_hashes(map(lambda k: record[k], keys))
+    return _join_hashes([record[k] for k in sorted(keys)])
 
 def _join_hashes_sql(properties):
     '''
