@@ -508,7 +508,7 @@ def handle_update_rows_event(event, catalog_entry, state, columns, rows_saved, t
     return rows_saved
 
 
-def handle_delete_rows_event(event, catalog_entry, state, columns, rows_saved, time_extracted, log_pos):
+def handle_delete_rows_event(event, catalog_entry, state, columns, rows_saved, time_extracted, bookmark):
     stream_version = common.get_stream_version(catalog_entry.tap_stream_id, state)
     db_column_types = get_db_column_types(event)
 
