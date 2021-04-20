@@ -43,9 +43,6 @@ SYS_LOG_FILE   = "_sys_log_file"
 SYS_LOG_POS    = "_sys_log_position"
 SYS_LINENO     = "_sys_transaction_lineno"
 
-METADATA_COLS  = set([SDC_DELETED_AT, SYS_UPDATED_AT, SYS_EVENT_TYPE, SYS_HASHDIFF, SYS_HASHKEY, '_sdc_extracted_at',
-    '_sdc_batched_at', SYS_LINENO, SYS_LOG_POS])
-
 INSERT_EVENT = 1
 UPDATE_EVENT = 2
 DELETE_EVENT = 3
