@@ -39,9 +39,9 @@ SYS_UPDATED_AT = "_sys_updated_at"
 SYS_EVENT_TYPE = "_sys_event_type"
 SYS_HASHDIFF   = "_sys_diffkey"
 SYS_HASHKEY    = "_sys_hashkey"
-
-METADATA_COLS  = set([SDC_DELETED_AT, SYS_UPDATED_AT, SYS_EVENT_TYPE, SYS_HASHDIFF, SYS_HASHKEY, '_sdc_extracted_at',
-    '_sdc_batched_at'])
+SYS_LOG_FILE   = "_sys_log_file"
+SYS_LOG_POS    = "_sys_log_position"
+SYS_LINENO     = "_sys_transaction_lineno"
 
 INSERT_EVENT = 1
 UPDATE_EVENT = 2
@@ -82,12 +82,29 @@ def add_automatic_properties(catalog_entry, columns):
             format="date-time"
     )
 
+    catalog_entry.schema.properties[SYS_LOG_POS] = Schema(
+        type='integer'
+    )
+
+    catalog_entry.schema.properties[SYS_LOG_FILE] = Schema(
+        type='integer'
+    )
+
+
+    catalog_entry.schema.properties[SYS_LINENO] = Schema(
+        type='integer'
+    )
+
+
 
     columns.append(SDC_DELETED_AT)
     columns.append(SYS_UPDATED_AT)
     columns.append(SYS_EVENT_TYPE)
     columns.append(SYS_HASHKEY)
     columns.append(SYS_HASHDIFF)
+    columns.append(SYS_LINENO)
+    columns.append(SYS_LOG_POS)
+    columns.append(SYS_LOG_FILE)
 
     return columns
 
@@ -317,14 +334,12 @@ def _join_hashes(values):
     def encode(x):
         s = str(x).encode('utf-8').strip()
 
-        if x is None or s == '':
+        if x is None or s == b'':
             return ''
         else:
             return sha1(s).hexdigest()
 
-    output = map(lambda x: encode(x), values)
-
-    return sha1(''.join(output).encode('utf-8')).hexdigest()
+    return sha1(''.join([encode(v) for v in values]).encode('utf-8')).hexdigest()
 
 def calculate_hashdiff(record, key_properties):
     '''
@@ -341,7 +356,7 @@ def calculate_hashdiff(record, key_properties):
 
     keys = sorted(keys)
 
-    return _join_hashes(map(lambda k: record[k], keys))
+    return _join_hashes([record[k] for k in keys])
 
 def calculate_hashkey(record, key_properties):
     '''
@@ -352,7 +367,7 @@ def calculate_hashkey(record, key_properties):
 
     keys = set(key_properties) | set([SYS_UPDATED_AT])
 
-    return _join_hashes(map(lambda k: record[k], keys))
+    return _join_hashes([record[k] for k in sorted(keys)])
 
 def _join_hashes_sql(properties):
     '''
@@ -374,8 +389,10 @@ def _join_hashes_sql(properties):
             true = sha1('True'.encode('utf-8')).hexdigest()
             false = sha1('False'.encode('utf-8')).hexdigest()
             encode_stmt = f"(CASE WHEN {column} AND {column} IS NOT NULL THEN '{true}' ELSE '{false}' END)"
-        elif _format == 'date-time' and _type == 'string':
+        elif _format == 'date-time' and _type == 'string' and column == '_sys_updated_at':
             encode_stmt = f"(CASE WHEN {column} IS NOT NULL THEN SHA1(to_char({column}, 'YYYY-MM-DD\"T\"HH24:MI:SS+00:00')) ELSE '' END)"
+        elif _format == 'date-time' and _type == 'string' and column != '_sys_updated_at':
+            encode_stmt = f"(CASE WHEN {column} IS NOT NULL THEN SHA1(to_char({column}, 'YYYY-MM-DD\"T\"HH24:MI:SS')) ELSE '' END)"
         elif _type == 'string':
             encode_stmt = f"(CASE WHEN TRIM(COALESCE({column}, '')) <> '' THEN SHA1({column}) ELSE '' END)"
         elif _type == 'integer':
@@ -429,15 +446,20 @@ def calculate_hashdiff_sql(catalog_entry):
 
 
 
-def handle_write_rows_event(event, catalog_entry, state, columns, rows_saved, time_extracted):
+def handle_write_rows_event(event, catalog_entry, state, columns, rows_saved, time_extracted, bookmark):
     stream_version = common.get_stream_version(catalog_entry.tap_stream_id, state)
     db_column_types = get_db_column_types(event)
 
+    line_number = 0
     for row in event.rows:
+        line_number += 1
         event_ts = datetime.datetime.utcfromtimestamp(event.timestamp).replace(tzinfo=pytz.UTC)
         vals = row['values']
         vals[SYS_UPDATED_AT] = event_ts
         vals[SYS_EVENT_TYPE] = INSERT_EVENT
+        vals[SYS_LOG_POS] = bookmark.get('log_pos', -1)
+        vals[SYS_LOG_FILE] = int(bookmark.get('log_file', 'mysql-bin-changelog.-1').split('.')[-1])
+        vals[SYS_LINENO] = line_number
 
         filtered_vals = {k: v for k, v in vals.items()
                          if k in columns}
@@ -454,15 +476,21 @@ def handle_write_rows_event(event, catalog_entry, state, columns, rows_saved, ti
     return rows_saved
 
 
-def handle_update_rows_event(event, catalog_entry, state, columns, rows_saved, time_extracted):
+def handle_update_rows_event(event, catalog_entry, state, columns, rows_saved, time_extracted, bookmark):
     stream_version = common.get_stream_version(catalog_entry.tap_stream_id, state)
     db_column_types = get_db_column_types(event)
 
+    line_number = 0
     for row in event.rows:
+        line_number += 1
         event_ts = datetime.datetime.utcfromtimestamp(event.timestamp).replace(tzinfo=pytz.UTC)
         vals = row['after_values']
         vals[SYS_UPDATED_AT] = event_ts
         vals[SYS_EVENT_TYPE] = UPDATE_EVENT
+        vals[SYS_LOG_POS] = bookmark.get('log_pos', -1)
+        vals[SYS_LOG_FILE] = int(bookmark.get('log_file', 'mysql-bin-changelog.-1').split('.')[-1])
+        vals[SYS_LINENO] = line_number
+
 
         filtered_vals = {k: v for k, v in vals.items()
                          if k in columns}
@@ -480,11 +508,13 @@ def handle_update_rows_event(event, catalog_entry, state, columns, rows_saved, t
     return rows_saved
 
 
-def handle_delete_rows_event(event, catalog_entry, state, columns, rows_saved, time_extracted):
+def handle_delete_rows_event(event, catalog_entry, state, columns, rows_saved, time_extracted, log_pos):
     stream_version = common.get_stream_version(catalog_entry.tap_stream_id, state)
     db_column_types = get_db_column_types(event)
 
+    line_number = 0
     for row in event.rows:
+        line_number += 1
         event_ts = datetime.datetime.utcfromtimestamp(event.timestamp).replace(tzinfo=pytz.UTC)
 
         vals = row['values']
@@ -492,6 +522,9 @@ def handle_delete_rows_event(event, catalog_entry, state, columns, rows_saved, t
         vals[SDC_DELETED_AT] = event_ts
         vals[SYS_UPDATED_AT] = event_ts
         vals[SYS_EVENT_TYPE] = DELETE_EVENT
+        vals[SYS_LOG_POS] = bookmark.get('log_pos', -1)
+        vals[SYS_LOG_FILE] = int(bookmark.get('log_file', 'mysql-bin-changelog.-1').split('.')[-1])
+        vals[SYS_LINENO] = line_number
 
         filtered_vals = {k: v for k, v in vals.items()
                          if k in columns}
@@ -539,6 +572,7 @@ def _run_binlog_sync(mysql_conn, reader, binlog_streams_map, state, config: Dict
 
     last_binlog_event = None
     for binlog_event in reader:
+
         last_binlog_event = binlog_event
         current_state['timestamp'] = max(current_state['timestamp'], binlog_event.timestamp)
 
@@ -616,13 +650,18 @@ def _run_binlog_sync(mysql_conn, reader, binlog_streams_map, state, config: Dict
                         binlog_streams_map[tap_stream_id]['desired_columns'] = new_columns
                         columns = new_columns
 
+                bookmark = {
+                        'log_pos': reader.log_pos,
+                        'log_file': reader.log_file
+                }
                 if isinstance(binlog_event, WriteRowsEvent):
                     rows_saved = handle_write_rows_event(binlog_event,
                                                          catalog_entry,
                                                          state,
                                                          columns,
                                                          rows_saved,
-                                                         time_extracted)
+                                                         time_extracted,
+                                                         bookmark)
 
                 elif isinstance(binlog_event, UpdateRowsEvent):
                     rows_saved = handle_update_rows_event(binlog_event,
@@ -630,7 +669,8 @@ def _run_binlog_sync(mysql_conn, reader, binlog_streams_map, state, config: Dict
                                                           state,
                                                           columns,
                                                           rows_saved,
-                                                          time_extracted)
+                                                          time_extracted,
+                                                          bookmark)
 
                 elif isinstance(binlog_event, DeleteRowsEvent):
                     rows_saved = handle_delete_rows_event(binlog_event,
@@ -638,7 +678,8 @@ def _run_binlog_sync(mysql_conn, reader, binlog_streams_map, state, config: Dict
                                                           state,
                                                           columns,
                                                           rows_saved,
-                                                          time_extracted)
+                                                          time_extracted,
+                                                          bookmark)
                 else:
                     LOGGER.debug("Skipping event for table %s.%s as it is not an INSERT, UPDATE, or DELETE",
                                  binlog_event.schema,
